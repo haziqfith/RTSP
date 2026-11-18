@@ -32,6 +32,8 @@ import ResourceCatalogView from './ResourceCatalogView';
 interface BookingWorkspaceProps {
   initialBookings: BookingRecord[];
   todayISO: string;
+  initialCategoryFilter?: 'Semua' | ResourceCategory;
+  initialStatusFilter?: 'Semua' | BookingStatus;
 }
 
 type WorkspaceView = 'all' | 'pending' | 'today' | 'catalog';
@@ -46,13 +48,19 @@ interface ToastState {
 export default function BookingWorkspace({
   initialBookings,
   todayISO,
+  initialCategoryFilter = 'Semua',
+  initialStatusFilter = 'Semua',
 }: BookingWorkspaceProps) {
   const [bookings, setBookings] = useState<BookingRecord[]>(initialBookings);
-  const [activeView, setActiveView] = useState<WorkspaceView>('all');
-  const [categoryFilter, setCategoryFilter] = useState<'Semua' | ResourceCategory>(
-    'Semua'
+  const [activeView, setActiveView] = useState<WorkspaceView>(
+    initialStatusFilter === 'Menunggu' ? 'pending' : 'all'
   );
-  const [statusFilter, setStatusFilter] = useState<'Semua' | BookingStatus>('Semua');
+  const [categoryFilter, setCategoryFilter] = useState<'Semua' | ResourceCategory>(
+    initialCategoryFilter
+  );
+  const [statusFilter, setStatusFilter] = useState<'Semua' | BookingStatus>(
+    initialStatusFilter
+  );
   const [onlyToday, setOnlyToday] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 

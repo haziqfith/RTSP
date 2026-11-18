@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { prisma } from './prisma';
 import {
   addDaysISO,
   BookingRecord,
@@ -13,6 +14,11 @@ const DATA_FILE = path.join(DATA_DIR, 'bookings.json');
 
 let memoryFallback: BookingRecord[] | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
+
+function isPrismaConfigured(): boolean {
+  const url = process.env.DATABASE_URL;
+  return Boolean(url && !url.includes('USER:PASSWORD@HOST'));
+}
 
 function createInitialSeed(): BookingRecord[] {
   const today = getTodayISO();
@@ -144,6 +150,32 @@ function createInitialSeed(): BookingRecord[] {
   ];
 }
 
+function mapPrismaBooking(row: {
+  id: string;
+  nama_pemohon: string;
+  no_pengenalan: string | null;
+  item_tempahan: string;
+  jenis: string;
+  tarikh: string;
+  slot_masa: string;
+  status: string;
+  tujuan: string | null;
+  created_at: Date;
+}): BookingRecord {
+  return {
+    id: row.id,
+    nama_pemohon: row.nama_pemohon,
+    no_pengenalan: row.no_pengenalan ?? undefined,
+    item_tempahan: row.item_tempahan,
+    jenis: row.jenis as ResourceCategory,
+    tarikh: row.tarikh,
+    slot_masa: row.slot_masa,
+    status: row.status as BookingStatus,
+    tujuan: row.tujuan ?? undefined,
+    created_at: row.created_at.toISOString(),
+  };
+}
+
 async function ensureSeedFile(): Promise<BookingRecord[]> {
   if (memoryFallback) {
     return memoryFallback;
@@ -188,9 +220,35 @@ async function persistBookings(bookings: BookingRecord[]): Promise<void> {
 }
 
 export async function getAllBookings(): Promise<BookingRecord[]> {
+  if (isPrismaConfigured()) {
+    let rows = await prisma.booking.findMany({
+      orderBy: [{ tarikh: 'asc' }, { slot_masa: 'asc' }],
+    });
+
+    if (rows.length === 0) {
+      const seed = createInitialSeed().map((item) => ({
+        id: item.id,
+        nama_pemohon: item.nama_pemohon,
+        no_pengenalan: item.no_pengenalan ?? null,
+        item_tempahan: item.item_tempahan,
+        jenis: item.jenis,
+        tarikh: item.tarikh,
+        slot_masa: item.slot_masa,
+        status: item.status,
+        tujuan: item.tujuan ?? null,
+        created_at: new Date(item.created_at),
+      }));
+      await prisma.booking.createMany({ data: seed, skipDuplicates: true });
+      rows = await prisma.booking.findMany({
+        orderBy: [{ tarikh: 'asc' }, { slot_masa: 'asc' }],
+      });
+    }
+
+    return rows.map(mapPrismaBooking);
+  }
+
   const bookings = await ensureSeedFile();
   return [...bookings].sort((a, b) => {
-    // Pending items first if same date, or sort newest date/created_at
     if (a.tarikh !== b.tarikh) {
       return a.tarikh.localeCompare(b.tarikh);
     }
@@ -207,6 +265,30 @@ export async function createBooking(input: {
   slot_masa: string;
   tujuan?: string;
 }): Promise<BookingRecord> {
+  if (isPrismaConfigured()) {
+    const existing = await prisma.booking.findMany({ select: { id: true } });
+    const maxNum = existing.reduce((max, item) => {
+      const match = item.id.match(/TMP-(\d+)/);
+      const num = match ? parseInt(match[1], 10) : 2400;
+      return num > max ? num : max;
+    }, 2400);
+
+    const created = await prisma.booking.create({
+      data: {
+        id: `TMP-${maxNum + 1}`,
+        nama_pemohon: input.nama_pemohon.trim(),
+        no_pengenalan: input.no_pengenalan?.trim() || null,
+        item_tempahan: input.item_tempahan.trim(),
+        jenis: input.jenis,
+        tarikh: input.tarikh,
+        slot_masa: input.slot_masa,
+        status: 'Menunggu',
+        tujuan: input.tujuan?.trim() || null,
+      },
+    });
+    return mapPrismaBooking(created);
+  }
+
   const bookings = await ensureSeedFile();
   const maxNum = bookings.reduce((max, item) => {
     const match = item.id.match(/TMP-(\d+)/);
@@ -236,6 +318,18 @@ export async function updateBookingStatus(
   id: string,
   status: BookingStatus
 ): Promise<BookingRecord | null> {
+  if (isPrismaConfigured()) {
+    try {
+      const updated = await prisma.booking.update({
+        where: { id },
+        data: { status },
+      });
+      return mapPrismaBooking(updated);
+    } catch {
+      return null;
+    }
+  }
+
   const bookings = await ensureSeedFile();
   const index = bookings.findIndex((b) => b.id === id);
   if (index === -1) return null;
@@ -251,6 +345,15 @@ export async function updateBookingStatus(
 }
 
 export async function deleteBooking(id: string): Promise<boolean> {
+  if (isPrismaConfigured()) {
+    try {
+      await prisma.booking.delete({ where: { id } });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   const bookings = await ensureSeedFile();
   const filtered = bookings.filter((b) => b.id !== id);
   if (filtered.length === bookings.length) return false;
@@ -259,6 +362,26 @@ export async function deleteBooking(id: string): Promise<boolean> {
 }
 
 export async function resetSeedBookings(): Promise<BookingRecord[]> {
+  if (isPrismaConfigured()) {
+    const seed = createInitialSeed().map((item) => ({
+      id: item.id,
+      nama_pemohon: item.nama_pemohon,
+      no_pengenalan: item.no_pengenalan ?? null,
+      item_tempahan: item.item_tempahan,
+      jenis: item.jenis,
+      tarikh: item.tarikh,
+      slot_masa: item.slot_masa,
+      status: item.status,
+      tujuan: item.tujuan ?? null,
+      created_at: new Date(item.created_at),
+    }));
+    await prisma.$transaction([
+      prisma.booking.deleteMany(),
+      prisma.booking.createMany({ data: seed }),
+    ]);
+    return getAllBookings();
+  }
+
   const seed = createInitialSeed();
   if (memoryFallback) {
     memoryFallback = seed;

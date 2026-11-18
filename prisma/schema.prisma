@@ -1,0 +1,26 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Booking {
+  id            String   @id
+  nama_pemohon  String
+  no_pengenalan String?
+  item_tempahan String
+  jenis         String
+  tarikh        String
+  slot_masa     String
+  status        String   @default("Menunggu")
+  tujuan        String?
+  created_at    DateTime @default(now())
+
+  @@index([tarikh])
+  @@index([jenis])
+  @@index([status])
+  @@map("bookings")
+}
