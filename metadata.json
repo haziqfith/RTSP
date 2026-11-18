@@ -1,0 +1,8 @@
+{
+  "name": "RuangKampus — Sistem Tempahan Ruang & Peralatan",
+  "description": "Portal pengurusan tempahan bilik perbincangan, makmal komputer, serta pinjaman peralatan studio dan sukan kampus.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
